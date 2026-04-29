@@ -1,0 +1,109 @@
+# airflow-review-app-chart/templates/scheduler-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "airflow-review-app-chart.fullname" . }}-scheduler ## <--- CORRECTED: Name for scheduler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "airflow-review-app-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: scheduler ## <--- CORRECTED: Component label
+spec:
+  replicas: 1 ## <--- Correct for a single scheduler instance in review app
+  selector:
+    matchLabels:
+      {{- include "airflow-review-app-chart.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: scheduler ## <--- CORRECTED: Component selector
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "airflow-review-app-chart.labels" . | nindent 8 }}
+        app.kubernetes.io/component: scheduler ## <--- CORRECTED: Component label
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "airflow-review-app-chart.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      ## <--- InitContainer for DAGs synchronization (remains the same)
+      initContainers:
+        - name: git-sync
+          image: alpine/git:latest # Small image with git
+          command: ["git", "clone", "--single-branch", "--branch", "{{ .Values.dagsRepo.branch }}", "{{ .Values.dagsRepo.url }}", "/dags"]
+          env:
+            - name: GIT_SSH_COMMAND
+              value: "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+          volumeMounts:
+            - name: dags-volume
+              mountPath: /dags
+            - name: ssh-key-volume # Mount SSH key for private repo clone
+              mountPath: /root/.ssh:ro
+
+      containers:
+        - name: airflow-scheduler ## <--- CORRECTED: Container name for scheduler
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default "latest" }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["airflow", "scheduler"] ## <--- CORRECTED: Command for Airflow scheduler
+          # No ports needed for scheduler
+
+          env: ## <--- Airflow-specific environment variables for scheduler
+            - name: AIRFLOW_HOME
+              value: "/opt/airflow"
+            - name: AIRFLOW__CORE__DAGS_FOLDER
+              value: "/opt/airflow/dags"
+            - name: AIRFLOW__CORE__LOAD_EXAMPLES
+              value: "False"
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: "{{ .Values.airflow.config.core.sql_alchemy_conn }}"
+            # Removed webserver-specific extraEnv for user creation
+
+          {{- with .Values.airflow.scheduler.resources }} ## <--- CORRECTED: Use scheduler specific resources from values
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts: ## <--- Volume mount for DAGs and any existing volumeMounts
+            - name: dags-volume
+              mountPath: /opt/airflow/dags:ro # Read-only mount for DAGs
+            {{- with .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          # Removed livenessProbe and readinessProbe as scheduler doesn't have HTTP endpoints
+
+      ## <--- Volumes for DAGs and SSH key (remains the same)
+      volumes:
+        - name: dags-volume
+          emptyDir: {} # Temporary volume for DAGs in the review app
+        - name: ssh-key-volume
+          secret:
+            secretName: {{ .Values.dagsRepo.sshKeySecretName }}
+            defaultMode: 0400 # Read-only for private key
+            items:
+              - key: id_rsa # This is the key name from the secret we'll create
+                path: id_rsa
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,132 @@
+# airflow-review-app-chart/templates/webserver-deployment.yaml (consider renaming to indicate it's for webserver)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "airflow-review-app-chart.fullname" . }}-webserver ## <--- MODIFIED: Specific name for webserver
+  namespace: {{ .Release.Namespace }} ## <--- ADDED: Namespace specification
+  labels:
+    {{- include "airflow-review-app-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webserver ## <--- ADDED: Component label
+spec:
+  replicas: 1 ## <--- MODIFIED: Set fixed to 1 for webserver in review app
+  selector:
+    matchLabels:
+      {{- include "airflow-review-app-chart.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: webserver ## <--- ADDED: Component selector
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "airflow-review-app-chart.labels" . | nindent 8 }}
+        app.kubernetes.io/component: webserver ## <--- ADDED: Component label
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "airflow-review-app-chart.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      ## <--- ADDED: InitContainer for DAGs synchronization
+      initContainers:
+        - name: git-sync
+          image: alpine/git:latest # Small image with git
+          command: ["git", "clone", "--single-branch", "--branch", "{{ .Values.dagsRepo.branch }}", "{{ .Values.dagsRepo.url }}", "/dags"]
+          env:
+            - name: GIT_SSH_COMMAND
+              value: "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
+          volumeMounts:
+            - name: dags-volume
+              mountPath: /dags
+            - name: ssh-key-volume # Mount SSH key for private repo clone
+              mountPath: /root/.ssh:ro
+
+      containers:
+        - name: airflow-webserver ## <--- MODIFIED: Specific name for webserver container
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default "latest" }}" ## <--- MODIFIED: Default tag to "latest"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["airflow", "webserver"] ## <--- ADDED: Command for Airflow webserver
+          ports:
+            - name: http
+              containerPort: 8080 ## <--- MODIFIED: Fixed port 8080 for Airflow webserver
+              protocol: TCP
+          env: ## <--- ADDED: Airflow-specific environment variables
+            - name: AIRFLOW_HOME
+              value: "/opt/airflow"
+            - name: AIRFLOW__CORE__DAGS_FOLDER
+              value: "/opt/airflow/dags"
+            - name: AIRFLOW__CORE__LOAD_EXAMPLES
+              value: "False"
+            - name: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN
+              value: "{{ .Values.airflow.config.core.sql_alchemy_conn }}"
+            - name: AIRFLOW__WEBSERVER__RBAC
+              value: "True"
+            - name: AIRFLOW__WEBSERVER__AUTH_BACKEND
+              value: "{{ .Values.airflow.config.webserver.auth_backend }}"
+            {{- with .Values.airflow.webserver.extraEnv }} ## <--- ADDED: Extra env for user creation
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.airflow.webserver.resources }} ## <--- MODIFIED: Use webserver specific resources from values
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts: ## <--- ADDED: Volume mount for DAGs and any existing volumeMounts
+            - name: dags-volume
+              mountPath: /opt/airflow/dags:ro # Read-only mount for DAGs
+            {{- with .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            initialDelaySeconds: 30 # Give Airflow time to start
+            periodSeconds: 10
+            failureThreshold: 3
+            httpGet:
+              path: /health # Airflow's health endpoint
+              port: 8080
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            initialDelaySeconds: 30 # Give Airflow time to start
+            periodSeconds: 10
+            failureThreshold: 3
+            httpGet:
+              path: /health
+              port: 8080
+          {{- end }}
+      ## <--- ADDED: Volumes for DAGs and SSH key
+      volumes:
+        - name: dags-volume
+          emptyDir: {} # Temporary volume for DAGs in the review app
+        - name: ssh-key-volume
+          secret:
+            secretName: {{ .Values.dagsRepo.sshKeySecretName }}
+            defaultMode: 0400 # Read-only for private key
+            items:
+              - key: id_rsa # This is the key name from the secret we'll create
+                path: id_rsa
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

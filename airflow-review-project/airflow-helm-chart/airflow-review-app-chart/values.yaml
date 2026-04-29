@@ -1,0 +1,91 @@
+# airflow-review-app-chart/values.yaml
+# --- Image Configuration ---
+image:
+  repository: 636964117877.dkr.ecr.eu-north-1.amazonaws.com/airflow-base-image # YOUR ECR URI
+  tag: latest # This will be dynamically set by CI/CD (CI_COMMIT_SHORT_SHA)
+  pullPolicy: IfNotPresent
+
+# --- Airflow Core Configuration ---
+airflow:
+  executor: KubernetesExecutor # Recommended for isolation and dynamic scaling of tasks
+  config:
+    core:
+      load_examples: "False"
+      dags_folder: "/opt/airflow/dags"
+      sql_alchemy_conn: "postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "postgresql.fullname" . }}:5432/{{ .Values.postgresql.auth.database }}"
+    webserver:
+      authenticate: "True"
+      auth_backend: "airflow.www.security:AirflowPasswordUser" # For password-based auth
+    scheduler:
+      min_file_process_interval: "30" # How often scheduler checks for new DAGs (in seconds)
+
+  # Define initial Airflow users for the webserver (for convenience)
+  # These are set as environment variables during webserver startup
+  webserver:
+    extraEnv:
+      - name: AIRFLOW_CREATE_USER_IF_MISSING
+        value: "true"
+      - name: _AIRFLOW_WWW_USER_USERNAME
+        value: "admin"
+      - name: _AIRFLOW_WWW_USER_PASSWORD
+        value: "admin"
+      - name: _AIRFLOW_WWW_USER_EMAIL
+        value: "admin@example.com"
+      - name: _AIRFLOW_WWW_USER_FIRSTNAME
+        value: "Airflow"
+      - name: _AIRFLOW_WWW_USER_LASTNAME
+        value: "Admin"
+      - name: _AIRFLOW_WWW_USER_ROLE
+        value: "Admin"
+    # Resource requests/limits for webserver pod - minimal for a sample
+    resources:
+      requests:
+        cpu: 100m # 0.1 CPU core
+        memory: 256Mi # 256 MB
+      limits:
+        cpu: 200m # 0.2 CPU core
+        memory: 512Mi # 512 MB
+
+  scheduler:
+    # Resource requests/limits for scheduler pod - minimal for a sample
+    resources:
+      requests:
+        cpu: 50m # 0.05 CPU core
+        memory: 128Mi # 128 MB
+      limits:
+        cpu: 100m # 0.1 CPU core
+        memory: 256Mi # 256 MB
+
+# --- Database Configuration (Ephemeral PostgreSQL) ---
+postgresql:
+  enabled: true # Enable embedded Bitnami PostgreSQL for review apps
+  auth:
+    username: airflow
+    password: airflow
+    database: airflow
+  primary:
+    persistence:
+      enabled: false # No persistence needed for ephemeral review apps
+    resources: # Minimal resources for PostgreSQL pod
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 100m
+        memory: 256Mi
+
+# --- Service Account for EKS Image Pull (IRSA) ---
+serviceAccount:
+  create: true
+  name: airflow-sa
+  annotations:
+    # This annotation links the K8s Service Account to an AWS IAM Role.
+    # We will create this IAM Role in Phase 8.
+    # REPLACE <YOUR_AWS_ACCOUNT_ID> below
+    eks.amazonaws.com/role-arn: "arn:aws:iam::636964117877:role/EKS-AirflowReviewApp-ECR-Pull"
+
+# --- DAGs Repository (for cloning on init container) ---
+dagsRepo:
+  url: "ssh://git@gitlab.com:<yatin222>/nielsen-airflow-dags-repo.git" # IMPORTANT: Replace with YOUR GitLab.com SSH repo URL
+  branch: "main" # This will be dynamically set by CI/CD (CI_COMMIT_REF_NAME)
+  sshKeySecretName: "gitlab-ssh-key" # Name of Kubernetes secret holding the SSH private key

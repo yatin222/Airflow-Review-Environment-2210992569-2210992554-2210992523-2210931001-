@@ -1,0 +1,19 @@
+# airflow-review-app-chart/templates/webserver-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "airflow-review-app-chart.fullname" . }}-webserver
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "airflow-review-app-chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webserver
+spec:
+  type: NodePort 
+  ports:
+    - port: 8080       # Port inside the cluster
+      targetPort: 8080 # Port of the Airflow webserver container
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "airflow-review-app-chart.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: webserver

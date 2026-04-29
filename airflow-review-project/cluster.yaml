@@ -1,0 +1,26 @@
+
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: airflow-review-cluster
+  region: eu-north-1 
+  version: "1.29" 
+iam:
+  withOIDC: true
+
+managedNodeGroups:
+  - name: airflow-app-nodes
+    instanceType: t3.medium 
+    minSize: 1 
+    maxSize: 3
+    desiredCapacity: 1
+    labels: {role: airflow-worker}
+    tags:
+      k8s.io/cluster-autoscaler/enabled: "true"
+      k8s.io/cluster-autoscaler/airflow-review-cluster: "owned"
+    volumeSize: 20
+    privateNetworking: true
+    ssh:
+      allow: true
+      publicKeyName: gitlab-key 
