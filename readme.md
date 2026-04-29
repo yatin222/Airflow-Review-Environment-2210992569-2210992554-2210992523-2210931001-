@@ -1,4 +1,4 @@
-# On Demand Airlfow Review Environments
+# On Demand Airlfow Review Environments (Copyright)
 
 ## Project Overview
 
@@ -13,6 +13,8 @@ This project implements an **Apache Airflow Review Application** deployed on **A
 - **GitLab CI/CD Integration** — DAGs are cloned from a GitLab repository via SSH, enabling branch-based review workflows.
 - **ECR Image Registry** — Custom Airflow Docker image (based on `apache/airflow:2.8.1-python3.10`) stored in AWS ECR.
 - **IRSA (IAM Roles for Service Accounts)** — Secure, fine-grained AWS permissions for pulling images from ECR.
+
+##Status : - Awaiting Copyright Confirmation
 
 ## Project Structure
 
